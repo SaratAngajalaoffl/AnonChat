@@ -9,27 +9,33 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
-func createRoom(ctx *gin.Context) {
+var runtime models.App = models.App{
+	Rooms:    map[int]*models.Room{},
+	Upgrader: websocket.Upgrader{},
+}
+
+func CreateRoom(ctx *gin.Context) {
 	var newRoom models.Room
 
 	if err := ctx.BindJSON(&newRoom); err != nil {
 		return
 	}
 
-	rId := generateRoomId()
+	rId := runtime.GenerateRoomId()
 
 	newRoom.Id = rId
 
-	rooms[rId] = &newRoom
+	runtime.Rooms[rId] = &newRoom
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"roomId": rId,
 	})
 }
 
-func getRoom(ctx *gin.Context) {
+func GetRoom(ctx *gin.Context) {
 
 	rId, err := strconv.Atoi(ctx.Param("rId"))
 
@@ -37,7 +43,7 @@ func getRoom(ctx *gin.Context) {
 		ctx.AbortWithError(http.StatusBadRequest, err)
 	}
 
-	room, ok := rooms[rId]
+	room, ok := runtime.Rooms[rId]
 
 	if !ok {
 		ctx.AbortWithError(http.StatusBadRequest, gin.Error{
@@ -47,19 +53,19 @@ func getRoom(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusAccepted, gin.H{
 		"room":         room,
-		"population":   len(room.participants),
-		"participants": room.participants,
+		"population":   len(room.Participants),
+		"participants": room.Participants,
 	})
 }
 
-func joinRoom(ctx *gin.Context) {
+func JoinRoom(ctx *gin.Context) {
 
 	w, r := ctx.Writer, ctx.Request
 
 	rId, err := strconv.Atoi(ctx.Param("rId"))
 	pName := ctx.Param("name")
 
-	room, ok := rooms[rId]
+	room, ok := runtime.Rooms[rId]
 
 	if !ok {
 		ctx.AbortWithError(http.StatusBadRequest, gin.Error{
@@ -74,16 +80,16 @@ func joinRoom(ctx *gin.Context) {
 		return
 	}
 
-	c, err := upgrader.Upgrade(w, r, nil)
+	c, err := runtime.Upgrader.Upgrade(w, r, nil)
 	defer c.Close()
 
-	participant := Participant{
+	participant := models.Participant{
 		Name: pName,
-		conn: c,
+		Conn: c,
 	}
 
-	room.participants = append(room.participants, &participant)
-	defer removeParticipant(rId, &participant)
+	room.Participants = append(room.Participants, &participant)
+	defer room.RemoveParticipant(&participant)
 
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -92,9 +98,9 @@ func joinRoom(ctx *gin.Context) {
 		return
 	}
 
-	for _, p := range room.participants {
-		if p.conn != c {
-			if err := p.conn.WriteMessage(1, []byte(participant.Name+" has joined the chat")); err != nil {
+	for _, p := range room.Participants {
+		if p.Conn != c {
+			if err := p.Conn.WriteMessage(1, []byte(participant.Name+" has joined the chat")); err != nil {
 				log.Println(err)
 				return
 			}
@@ -109,9 +115,9 @@ func joinRoom(ctx *gin.Context) {
 			return
 		}
 
-		for _, pt := range room.participants {
-			if pt.conn != c {
-				if err := pt.conn.WriteMessage(messageType, p); err != nil {
+		for _, pt := range room.Participants {
+			if pt.Conn != c {
+				if err := pt.Conn.WriteMessage(messageType, p); err != nil {
 					log.Println(err)
 					return
 				}
