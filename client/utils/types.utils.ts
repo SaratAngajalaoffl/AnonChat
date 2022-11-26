@@ -1,7 +1,7 @@
 export type Room = {
   id: number;
   topic: string;
-  Participants: null | [{ name: string }];
+  participants: null | [{ name: string }];
 };
 
 export type Message = {

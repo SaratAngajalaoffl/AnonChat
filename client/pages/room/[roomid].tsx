@@ -227,7 +227,7 @@ function ChatRoomPage({}: Props) {
                 <Typography variant="body1">{connection?.name}(You)</Typography>
               </Grid>
             </Grid>
-            {room.Participants?.map((participant) => (
+            {room.participants?.map((participant) => (
               <Grid
                 key={participant.name}
                 item

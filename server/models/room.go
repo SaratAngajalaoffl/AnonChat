@@ -1,9 +1,9 @@
 package models
 
 type Room struct {
-	Id           int    `json:"id"`
-	Topic        string `json:"topic"`
-	Participants []*Participant
+	Id           int            `json:"id"`
+	Topic        string         `json:"topic"`
+	Participants []*Participant `json:"participants"`
 }
 
 func (r *Room) RemoveParticipant(i *Participant) {

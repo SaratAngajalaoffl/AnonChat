@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"SaratAngajalaoffl/AnonChat/server/models"
+	"encoding/json"
 
 	"errors"
 	"log"
@@ -13,8 +14,10 @@ import (
 )
 
 var runtime models.App = models.App{
-	Rooms:    map[int]*models.Room{},
-	Upgrader: websocket.Upgrader{},
+	Rooms: map[int]*models.Room{},
+	Upgrader: websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return true },
+	},
 }
 
 func CreateRoom(ctx *gin.Context) {
@@ -99,11 +102,22 @@ func JoinRoom(ctx *gin.Context) {
 	}
 
 	for _, p := range room.Participants {
-		if p.Conn != c {
-			if err := p.Conn.WriteMessage(1, []byte(participant.Name+" has joined the chat")); err != nil {
-				log.Println(err)
-				return
-			}
+
+		message := models.Message{
+			Sender:  pName,
+			Message: participant.Name + " has joined the chat",
+		}
+
+		encMsg, err := json.Marshal(message)
+
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		if err := p.Conn.WriteMessage(1, encMsg); err != nil {
+			log.Println(err)
+			return
 		}
 	}
 
@@ -115,12 +129,22 @@ func JoinRoom(ctx *gin.Context) {
 			return
 		}
 
+		message := models.Message{
+			Sender:  pName,
+			Message: string(p[:]),
+		}
+
+		encMsg, err := json.Marshal(message)
+
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
 		for _, pt := range room.Participants {
-			if pt.Conn != c {
-				if err := pt.Conn.WriteMessage(messageType, p); err != nil {
-					log.Println(err)
-					return
-				}
+			if err := pt.Conn.WriteMessage(messageType, encMsg); err != nil {
+				log.Println(err)
+				return
 			}
 		}
 	}
