@@ -18,10 +18,19 @@ export const createRoom = async (
   }
 };
 
-export const joinRoom = async ({ roomId, uname }: types.joinRoomRequest) => {
-  const socket = new WebSocket(`${JOIN_ROOM_URL}/${roomId}/${uname}`);
+export const joinRoom = ({
+  roomId,
+  uname,
+}: types.joinRoomRequest): Promise<{ error?: Error; socket?: WebSocket }> => {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(`${JOIN_ROOM_URL}/${roomId}/${uname}`);
 
-  return socket;
+    socket.addEventListener("error", (error) =>
+      resolve({ error: Error("Couldn't join room") })
+    );
+
+    socket.addEventListener("open", () => resolve({ socket }));
+  });
 };
 
 export const getRoom = async (

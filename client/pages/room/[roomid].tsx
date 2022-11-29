@@ -1,8 +1,13 @@
 import { useRouter } from "next/router";
-import React, { KeyboardEventHandler, useEffect, useState } from "react";
+import React, {
+  KeyboardEventHandler,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import LoadingComponent from "../../components/loading/LoadingComponent";
 import { getRoom, joinRoom } from "../../services/room";
-import { Message, Room } from "../../utils/types.utils";
+import { Message, Room, SocketData } from "../../utils/types.utils";
 import Typography from "@mui/material/Typography";
 import IconButton from "@mui/material/IconButton";
 import LogoutIcon from "@mui/icons-material/Logout";
@@ -21,6 +26,8 @@ import {
   ChatBubbleSecondary,
   RootContainer,
 } from "./styles";
+import UsernameModal from "../../components/modals/UsernameModal";
+import { Socket } from "dgram";
 
 type Props = {};
 
@@ -37,10 +44,79 @@ function ChatRoomPage({}: Props) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [messages, setMessages] = useState<Message[]>([]);
 
-  const handleRecieveMessage = (message: string) => {
-    const parsedMessage: Message = JSON.parse(message);
+  const getRoomData = useCallback(async () => {
+    if (!roomid || typeof roomid !== "string") return console.log("No data");
 
-    setMessages((prevState) => prevState.concat(parsedMessage));
+    const { data, error } = await getRoom(roomid);
+
+    if (error) return console.log(error);
+
+    if (!data) return console.log("No Data");
+
+    setRoom(data.room);
+    setPopulation(data.population);
+
+    setIsLoading(false);
+  }, [roomid]);
+
+  const handleRecieveMessage = useCallback(
+    (message: string) => {
+      const parsedData: SocketData = JSON.parse(message);
+
+      if (parsedData.type === "MESSAGE") {
+        setMessages((prevState) => prevState.concat(parsedData.data));
+      } else {
+        getRoomData();
+      }
+    },
+    [getRoomData]
+  );
+
+  const handleJoin = useCallback(
+    async (uname: string) => {
+      if (!uname) return console.log("Please Enter Name");
+
+      if (!room) return console.log("No room, something wrong");
+
+      setIsLoading(true);
+
+      const { error, socket } = await joinRoom({
+        roomId: room.id,
+        uname: uname,
+      });
+
+      if (error) {
+        setIsLoading(false);
+        return console.log(error);
+      }
+
+      if (!socket) {
+        setIsLoading(false);
+        return console.log(error);
+      }
+
+      setConnection({ name: uname, socket });
+
+      setIsLoading(false);
+    },
+    [room]
+  );
+
+  useEffect(() => {
+    getRoomData();
+  }, [getRoomData]);
+
+  useEffect(() => {
+    if (connection)
+      connection.socket.addEventListener("message", (e) =>
+        handleRecieveMessage(e.data)
+      );
+
+    return () => connection?.socket.close();
+  }, [connection, handleRecieveMessage]);
+
+  const handleCancel = () => {
+    router.back();
   };
 
   const handleSendMessage = () => {
@@ -48,6 +124,10 @@ function ChatRoomPage({}: Props) {
     if (currMsg.length < 1) return;
 
     connection.socket.send(currMsg);
+
+    document
+      .querySelector("html")
+      ?.scrollTo({ top: document.querySelector("html")?.scrollHeight });
     setCurrMsg("");
   };
 
@@ -55,43 +135,30 @@ function ChatRoomPage({}: Props) {
     if (e.key === "Enter") handleSendMessage();
   };
 
-  useEffect(() => {
-    (async () => {
-      setIsLoading(true);
-
-      if (!roomid || typeof roomid !== "string") return console.log("No data");
-
-      const { data, error } = await getRoom(roomid);
-
-      if (error) return console.log(error);
-
-      if (!data) return console.log("No Data");
-
-      setRoom(data.room);
-      setPopulation(data.population);
-
-      const uname = prompt("Enter username");
-
-      if (!uname) return console.log("Please Enter Name");
-
-      const socket = await joinRoom({ roomId: data.room.id, uname: uname });
-
-      socket.addEventListener("message", (e) => handleRecieveMessage(e.data));
-
-      setConnection({ name: uname, socket });
-
-      setIsLoading(false);
-    })();
-  }, [roomid]);
-
   if (isLoading || !room) return <LoadingComponent />;
+
+  if (!connection)
+    return (
+      <UsernameModal
+        isOpen={true}
+        handleCancel={handleCancel}
+        handleJoin={handleJoin}
+      />
+    );
 
   return (
     <RootContainer sx={{ flexGrow: 1 }} display="flex" flexDirection="column">
       <Grid
         container
         direction="row"
-        style={{ backgroundColor: "#121212", height: "10vh" }}
+        style={{
+          backgroundColor: "#121212",
+          height: "10vh",
+          position: "sticky",
+          top: 0,
+          left: 0,
+          zIndex: 1,
+        }}
         alignItems="center"
         padding={2}
       >
@@ -142,9 +209,10 @@ function ChatRoomPage({}: Props) {
             container
             direction="column"
             justifyContent="flex-end"
+            flexWrap="nowrap"
             overflow="scroll"
             alignItems="stretch"
-            style={{ height: "80vh", overflow: "scroll" }}
+            style={{ height: "70vh", overflow: "scroll" }}
           >
             {messages?.map((message, index) => (
               <Grid
@@ -176,6 +244,15 @@ function ChatRoomPage({}: Props) {
               onKeyDown={handleKeyDown}
               color="primary"
               value={currMsg}
+              style={{
+                zIndex: 1,
+                backgroundColor: "black",
+                position: "fixed",
+                width: "75vw",
+                height: "10vh",
+                top: "90vh",
+                left: 0,
+              }}
               onChange={(e) => setCurrMsg(e.target.value)}
               endAdornment={
                 <InputAdornment position="end">
@@ -196,7 +273,13 @@ function ChatRoomPage({}: Props) {
           <Grid
             item
             lg={2}
-            style={{ padding: 10 }}
+            style={{
+              height: "80vh",
+              padding: 10,
+              position: "sticky",
+              top: "10vh",
+              right: 0,
+            }}
             container
             direction="column"
             spacing={2}
@@ -227,23 +310,28 @@ function ChatRoomPage({}: Props) {
                 <Typography variant="body1">{connection?.name}(You)</Typography>
               </Grid>
             </Grid>
-            {room.participants?.map((participant) => (
-              <Grid
-                key={participant.name}
-                item
-                container
-                direction="row"
-                spacing={1}
-                alignItems="center"
-              >
-                <Grid item>
-                  <PersonIcon />
-                </Grid>
-                <Grid item>
-                  <Typography variant="body1">{participant.name}</Typography>
-                </Grid>
-              </Grid>
-            ))}
+            {room.participants?.map(
+              (participant) =>
+                participant.name !== connection.name && (
+                  <Grid
+                    key={participant.name}
+                    item
+                    container
+                    direction="row"
+                    spacing={1}
+                    alignItems="center"
+                  >
+                    <Grid item>
+                      <PersonIcon />
+                    </Grid>
+                    <Grid item>
+                      <Typography variant="body1">
+                        {participant.name}
+                      </Typography>
+                    </Grid>
+                  </Grid>
+                )
+            )}
           </Grid>
         </Hidden>
       </Grid>

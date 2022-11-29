@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"SaratAngajalaoffl/AnonChat/server/models"
-	"encoding/json"
 
 	"errors"
 	"log"
@@ -50,7 +49,7 @@ func GetRoom(ctx *gin.Context) {
 
 	if !ok {
 		ctx.AbortWithError(http.StatusBadRequest, gin.Error{
-			Err: errors.New("Room not found"),
+			Err: errors.New("room not found"),
 		})
 	}
 
@@ -66,15 +65,6 @@ func JoinRoom(ctx *gin.Context) {
 	w, r := ctx.Writer, ctx.Request
 
 	rId, err := strconv.Atoi(ctx.Param("rId"))
-	pName := ctx.Param("name")
-
-	room, ok := runtime.Rooms[rId]
-
-	if !ok {
-		ctx.AbortWithError(http.StatusBadRequest, gin.Error{
-			Err: errors.New("Room not found"),
-		})
-	}
 
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -83,7 +73,35 @@ func JoinRoom(ctx *gin.Context) {
 		return
 	}
 
+	pName := ctx.Param("name")
+
+	room, ok := runtime.Rooms[rId]
+
+	if !ok {
+		ctx.AbortWithError(http.StatusBadRequest, gin.Error{
+			Err: errors.New("room not found"),
+		})
+		return
+	}
+
+	for _, p := range room.Participants {
+		if p.Name == pName {
+			ctx.AbortWithError(http.StatusBadRequest, gin.Error{
+				Err: errors.New("username already taken"),
+			})
+			return
+		}
+	}
+
 	c, err := runtime.Upgrader.Upgrade(w, r, nil)
+
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": err,
+		})
+		return
+	}
+
 	defer c.Close()
 
 	participant := models.Participant{
@@ -92,34 +110,9 @@ func JoinRoom(ctx *gin.Context) {
 	}
 
 	room.Participants = append(room.Participants, &participant)
-	defer room.RemoveParticipant(&participant)
 
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": err,
-		})
-		return
-	}
-
-	for _, p := range room.Participants {
-
-		message := models.Message{
-			Sender:  pName,
-			Message: participant.Name + " has joined the chat",
-		}
-
-		encMsg, err := json.Marshal(message)
-
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
-		if err := p.Conn.WriteMessage(1, encMsg); err != nil {
-			log.Println(err)
-			return
-		}
-	}
+	handleParticipantJoined(room, &participant)
+	defer handleParticipantLeft(room, &participant)
 
 	for {
 		messageType, p, err := c.ReadMessage()
@@ -129,23 +122,6 @@ func JoinRoom(ctx *gin.Context) {
 			return
 		}
 
-		message := models.Message{
-			Sender:  pName,
-			Message: string(p[:]),
-		}
-
-		encMsg, err := json.Marshal(message)
-
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
-		for _, pt := range room.Participants {
-			if err := pt.Conn.WriteMessage(messageType, encMsg); err != nil {
-				log.Println(err)
-				return
-			}
-		}
+		handleBroadcastMessage(room, &participant, string(p[:]), messageType)
 	}
 }
